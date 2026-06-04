@@ -1,0 +1,164 @@
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+html,
+body,
+#app{
+  width:100%;
+  height:100%;
+}
+
+body{
+  background:#f5f7fb;
+  font-family:
+  "Microsoft JhengHei",
+  sans-serif;
+}
+
+.layout{
+  display:flex;
+  height:100vh;
+}
+
+.sidebar{
+  width:260px;
+  background:white;
+  border-right:1px solid #ddd;
+  padding:20px;
+}
+
+.logo{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  margin-bottom:30px;
+}
+
+.logo-icon{
+  width:45px;
+  height:45px;
+  background:#1d6fe9;
+  color:white;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  border-radius:10px;
+}
+
+.logo h2{
+  color:#1d6fe9;
+  font-size:22px;
+}
+
+.logo p{
+  color:#666;
+  font-size:13px;
+}
+
+.menu-btn{
+  width:100%;
+  border:none;
+  background:white;
+  padding:16px;
+  border-radius:10px;
+  margin-bottom:10px;
+  font-size:18px;
+  cursor:pointer;
+}
+
+.active{
+  background:#dfe8ff;
+  color:#1d6fe9;
+}
+
+.content{
+  flex:1;
+}
+
+.topbar{
+  background:white;
+  border-bottom:1px solid #ddd;
+  padding:20px 30px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.topbar input{
+  width:450px;
+  padding:12px;
+  border-radius:25px;
+  border:1px solid #ccc;
+}
+
+.user{
+  display:flex;
+  gap:20px;
+  align-items:center;
+}
+
+.user button{
+  background:#1d6fe9;
+  color:white;
+  border:none;
+  padding:10px 16px;
+  border-radius:8px;
+}
+
+.page{
+  padding:30px;
+}
+
+.page-header{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:20px;
+}
+
+.page-header button{
+  background:#1d6fe9;
+  color:white;
+  border:none;
+  padding:12px 18px;
+  border-radius:8px;
+}
+
+.card{
+  background:white;
+  border-radius:15px;
+  padding:20px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+th,
+td{
+  padding:15px;
+  border-bottom:1px solid #eee;
+  text-align:left;
+}
+
+.card-list{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:20px;
+}
+
+.small-card{
+  background:white;
+  border-radius:15px;
+  padding:25px;
+}
+
+.placeholder{
+  background:white;
+  padding:50px;
+  border-radius:15px;
+  margin-top:20px;
+}
