@@ -584,6 +584,7 @@ async function deleteStudent(id) {
   try {
     await removeStudent(id)
     students.value = students.value.filter(student => student.id !== id)
+    checkinHistory.value = checkinHistory.value.filter(record => record.studentId !== id)
   } catch (error) {
     alert(error.message)
   }
@@ -632,6 +633,11 @@ async function saveStudentEdit(student) {
   try {
     const savedStudent = await updateStudent(student.id, updatedStudent)
     Object.assign(student, updatedStudent, savedStudent)
+    checkinHistory.value = checkinHistory.value.map(record =>
+      record.studentId === student.id
+        ? { ...record, studentName: student.name }
+        : record
+    )
     cancelStudentEdit()
     alert("學生資料已更新")
   } catch (error) {
