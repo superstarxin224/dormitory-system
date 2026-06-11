@@ -468,19 +468,20 @@ function toggleRepairNotifications() {
 
 function rememberAuth(user) {
   authUser.value = user
-  localStorage.setItem(AUTH_KEY, JSON.stringify(user))
+  sessionStorage.setItem(AUTH_KEY, JSON.stringify(user))
+  localStorage.removeItem(AUTH_KEY)
 }
 
 function restoreAuth() {
   try {
-    const savedUser = JSON.parse(localStorage.getItem(AUTH_KEY) || "null")
+    const savedUser = JSON.parse(sessionStorage.getItem(AUTH_KEY) || "null")
 
     if (savedUser?.role) {
       authUser.value = savedUser
       currentPage.value = savedUser.role === "admin" ? "dashboard" : "my-room"
     }
   } catch {
-    localStorage.removeItem(AUTH_KEY)
+    sessionStorage.removeItem(AUTH_KEY)
   }
 }
 
@@ -566,6 +567,7 @@ async function login() {
 
 function logout() {
   authUser.value = null
+  sessionStorage.removeItem(AUTH_KEY)
   localStorage.removeItem(AUTH_KEY)
   searchKeyword.value = ""
   showRepairNotifications.value = false
