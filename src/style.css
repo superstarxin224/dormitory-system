@@ -986,6 +986,11 @@ tbody tr:last-child td{
   color:#516782;
 }
 
+.student-status.已換房{
+  background:var(--warning-soft);
+  color:var(--warning);
+}
+
 .student-status.未分配{
   background:#edf4fb;
   color:var(--muted);

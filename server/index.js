@@ -63,7 +63,8 @@ function getStudentPayload(body) {
     phone: String(body.phone || "").trim(),
     email: String(body.email || "").trim(),
     bed: String(body.bed || "").trim(),
-    status: String(body.status || "").trim()
+    status: String(body.status || "").trim(),
+    checkinDate: String(body.checkinDate || "").trim()
   };
 }
 
@@ -181,6 +182,7 @@ async function syncStudentCheckin(connection, student) {
   }
 
   if (student.status === "入住中" && student.bed) {
+    const checkinDate = student.checkinDate || null;
     const [[bed]] = await connection.execute(
       "SELECT bed_id FROM BED WHERE bed_id = ?",
       [student.bed]
@@ -196,20 +198,37 @@ async function syncStudentCheckin(connection, student) {
           `UPDATE BED SET availability = '空床' WHERE bed_id = ?`,
           [currentCheckin.bed_id]
         );
-      }
 
-      await connection.execute(
-        `UPDATE CHECKIN
-         SET bed_id = ?,
-             status = '入住中'
-         WHERE checkin_id = ?`,
-        [student.bed, currentCheckin.checkin_id]
-      );
+        await connection.execute(
+          `UPDATE CHECKIN
+           SET checkout_date = CASE
+                 WHEN COALESCE(?, CURRENT_DATE) >= checkin_date THEN COALESCE(?, CURRENT_DATE)
+                 ELSE checkin_date
+               END,
+               status = '已換房',
+               change_reason = ?
+           WHERE checkin_id = ?`,
+          [checkinDate, checkinDate, `換房至 ${student.bed}`, currentCheckin.checkin_id]
+        );
+
+        await connection.execute(
+          `INSERT INTO CHECKIN (student_id, bed_id, checkin_date, status, change_reason)
+           VALUES (?, ?, COALESCE(?, CURRENT_DATE), '入住中', ?)`,
+          [student.id, student.bed, checkinDate, `由 ${currentCheckin.bed_id} 換房入住`]
+        );
+      } else {
+        await connection.execute(
+          `UPDATE CHECKIN
+           SET status = '入住中'
+           WHERE checkin_id = ?`,
+          [currentCheckin.checkin_id]
+        );
+      }
     } else {
       await connection.execute(
         `INSERT INTO CHECKIN (student_id, bed_id, checkin_date, status)
-         VALUES (?, ?, CURRENT_DATE, '入住中')`,
-        [student.id, student.bed]
+         VALUES (?, ?, COALESCE(?, CURRENT_DATE), '入住中')`,
+        [student.id, student.bed, checkinDate]
       );
     }
 

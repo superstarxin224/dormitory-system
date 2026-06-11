@@ -909,7 +909,8 @@ async function createCheckin() {
     const savedStudent = await updateStudent(student.id, {
       ...student,
       status: "入住中",
-      bed: checkinForm.value.bedId
+      bed: checkinForm.value.bedId,
+      checkinDate: checkinForm.value.date
     })
 
     Object.assign(student, {
