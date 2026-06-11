@@ -16,6 +16,11 @@ body{
   font-family:
   "Microsoft JhengHei",
   sans-serif;
+  color:#1f2937;
+}
+
+button{
+  font-family:inherit;
 }
 
 .layout{
@@ -67,6 +72,11 @@ body{
   margin-bottom:10px;
   font-size:18px;
   cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  text-align:left;
 }
 
 .active{
@@ -74,8 +84,26 @@ body{
   color:#1d6fe9;
 }
 
+.menu-badge{
+  min-width:24px;
+  height:24px;
+  padding:0 7px;
+  border-radius:999px;
+  background:#dc2626;
+  color:white;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  font-size:13px;
+  font-weight:700;
+  line-height:1;
+}
+
 .content{
   flex:1;
+  min-width:0;
+  overflow:auto;
 }
 
 .topbar{
@@ -98,6 +126,8 @@ body{
   display:flex;
   gap:20px;
   align-items:center;
+  flex-wrap:wrap;
+  justify-content:flex-end;
 }
 
 .user button{
@@ -150,10 +180,156 @@ td{
   gap:20px;
 }
 
+.dorm-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(220px, 1fr));
+  gap:20px;
+}
+
+.dorm-card{
+  display:flex;
+  min-height:190px;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  background:white;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:24px;
+  color:#1f2937;
+  text-align:left;
+  cursor:pointer;
+  box-shadow:0 6px 18px rgba(0,0,0,0.06);
+}
+
+.dorm-card:hover{
+  border-color:#1d6fe9;
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px rgba(0,0,0,0.08);
+}
+
+.dorm-card span{
+  color:#6b7280;
+  font-weight:700;
+}
+
+.dorm-card strong{
+  color:#1d6fe9;
+  font-size:28px;
+}
+
+.dorm-card-stats{
+  display:grid;
+  width:100%;
+  grid-template-columns:repeat(3, 1fr);
+  gap:10px;
+}
+
+.dorm-card-stats p{
+  background:#f5f7fb;
+  border-radius:8px;
+  padding:10px;
+  color:#374151;
+  font-weight:700;
+  text-align:center;
+}
+
 .small-card{
   background:white;
   border-radius:15px;
   padding:25px;
+}
+
+.dorm-beds-card{
+  margin-top:20px;
+}
+
+.dorm-beds-card h2{
+  margin-bottom:16px;
+}
+
+.room-detail-section{
+  margin-top:20px;
+}
+
+.room-detail-section h3{
+  margin-bottom:12px;
+  color:#1f2937;
+}
+
+.bed-list{
+  grid-template-columns:repeat(5, minmax(120px, 1fr));
+}
+
+.bed-list .small-card{
+  border-radius:8px;
+  padding:16px;
+}
+
+.room-grid{
+  display:grid;
+  grid-template-columns:repeat(5, minmax(150px, 1fr));
+  gap:16px;
+}
+
+.room-card{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:16px;
+  min-height:165px;
+  background:white;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:18px;
+  color:#1f2937;
+  text-align:left;
+  cursor:pointer;
+  box-shadow:0 4px 14px rgba(0,0,0,0.05);
+}
+
+.room-card:hover,
+.room-card.selected{
+  border-color:#1d6fe9;
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px rgba(0,0,0,0.08);
+}
+
+.room-card span{
+  color:#6b7280;
+  font-weight:700;
+}
+
+.room-card strong{
+  display:block;
+  margin-top:6px;
+  color:#1d6fe9;
+  font-size:26px;
+}
+
+.room-card-meta{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:8px;
+}
+
+.room-card-meta p{
+  background:#f5f7fb;
+  border-radius:8px;
+  padding:8px;
+  color:#374151;
+  font-size:14px;
+  font-weight:700;
+  text-align:center;
+}
+
+.compact-header{
+  align-items:flex-start;
+}
+
+.compact-header h2{
+  margin-bottom:6px;
 }
 
 .placeholder{
@@ -173,10 +349,32 @@ td{
   font-weight:600;
 }
 
-.form-group input{
+.form-group input,
+.form-group select{
   padding:12px;
   border:1px solid #ccc;
   border-radius:8px;
+}
+
+.form-group input:disabled,
+.form-group select:disabled{
+  background:#f3f4f6;
+  color:#6b7280;
+}
+
+.checkin-student-panel{
+  display:grid;
+  grid-template-columns:repeat(5, minmax(120px, 1fr));
+  gap:12px;
+  padding:14px;
+  border:1px solid #dbeafe;
+  border-radius:8px;
+  background:#f8fbff;
+}
+
+.checkin-student-panel .notice{
+  grid-column:1 / -1;
+  margin-bottom:0;
 }
 
 .submit-btn{
@@ -191,7 +389,7 @@ td{
 .student-form{
   display:grid;
   grid-template-columns:
-  repeat(5,1fr)
+  repeat(6,1fr)
   auto;
 
   gap:12px;
@@ -199,7 +397,8 @@ td{
   margin-bottom:20px;
 }
 
-.student-form input{
+.student-form input,
+.student-form select{
   padding:12px;
   border:1px solid #ccc;
   border-radius:8px;
@@ -219,6 +418,7 @@ td{
   1fr
   1fr
   1fr
+  1fr
   auto;
 
   gap:12px;
@@ -231,12 +431,48 @@ td{
   border-radius:8px;
 }
 
+.repair-form input:disabled{
+  background:#f3f4f6;
+  color:#4b5563;
+}
+
 .repair-form button{
   background:#1d6fe9;
   color:white;
   border:none;
   border-radius:8px;
   padding:12px 18px;
+}
+
+.repair-form button:disabled{
+  background:#94a3b8;
+  cursor:not-allowed;
+}
+
+.repair-list-card{
+  margin-top:20px;
+}
+
+.repair-list-card h2{
+  margin-bottom:16px;
+}
+
+.repair-photo-preview{
+  display:block;
+  width:180px;
+  height:120px;
+  object-fit:cover;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  margin-top:14px;
+}
+
+.repair-photo-thumb{
+  width:72px;
+  height:54px;
+  object-fit:cover;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
 }
 
 .dashboard-grid{
@@ -281,6 +517,25 @@ td{
 
 .delete-btn:hover{
   background:#dc2626;
+}
+
+.notice,
+.error-notice{
+  margin-bottom:16px;
+  padding:12px 14px;
+  border-radius:8px;
+  background:white;
+}
+
+.notice{
+  color:#1d6fe9;
+  border:1px solid #bfdbfe;
+}
+
+.error-notice{
+  color:#b91c1c;
+  border:1px solid #fecaca;
+  background:#fff7f7;
 }
 .search-card{
   margin-bottom:20px;
@@ -380,17 +635,13 @@ td{
   background:#dcfce7;
   color:#16a34a;
 }
-.edit-status-btn{
-  background:#2563eb;
-  color:white;
-  border:none;
+.status-select{
+  min-width:110px;
+  padding:8px 10px;
+  border:1px solid #cbd5e1;
   border-radius:8px;
-  padding:8px 12px;
-  cursor:pointer;
-}
-
-.edit-status-btn:hover{
-  background:#1d4ed8;
+  background:white;
+  font:inherit;
 }
 
 .delete-repair-btn{
@@ -448,6 +699,15 @@ th{
   font-weight:700;
 }
 
+.table-input{
+  width:100%;
+  min-width:90px;
+  padding:8px 10px;
+  border:1px solid #cbd5e1;
+  border-radius:8px;
+  font:inherit;
+}
+
 .topbar{
   box-shadow:0 2px 8px rgba(0,0,0,0.03);
 }
@@ -490,4 +750,141 @@ th{
 
 .reset-btn:hover{
   background:#dc2626 !important;
+}
+
+.login-page{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:
+    linear-gradient(135deg, rgba(29,111,233,0.12), rgba(16,185,129,0.10)),
+    #f5f7fb;
+}
+
+.login-panel{
+  width:min(460px, 100%);
+  background:white;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:28px;
+  box-shadow:0 18px 45px rgba(15,23,42,0.12);
+}
+
+.login-brand{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:24px;
+}
+
+.login-brand h1{
+  font-size:26px;
+  color:#1d6fe9;
+}
+
+.login-brand p{
+  margin-top:4px;
+  color:#6b7280;
+}
+
+.login-form{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+
+.login-form label{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  font-weight:700;
+}
+
+.login-form input{
+  padding:13px 14px;
+  border:1px solid #cbd5e1;
+  border-radius:8px;
+  font-size:16px;
+}
+
+.logout-btn{
+  background:#475569 !important;
+}
+
+.logout-btn:hover{
+  background:#334155 !important;
+}
+
+.detail-card{
+  display:grid;
+  grid-template-columns:repeat(5, minmax(130px, 1fr));
+  gap:18px;
+}
+
+.detail-card p{
+  color:#6b7280;
+  margin-bottom:8px;
+}
+
+.detail-card strong{
+  font-size:18px;
+}
+
+.muted-text{
+  color:#6b7280;
+  font-size:14px;
+}
+
+.empty-text{
+  text-align:center;
+  color:#6b7280;
+}
+
+.empty-bed-summary{
+  padding:18px;
+  border:1px dashed #cbd5e1;
+  border-radius:8px;
+  color:#6b7280;
+  background:#f8fafc;
+}
+
+@media (max-width: 980px){
+  .layout{
+    flex-direction:column;
+    height:auto;
+    min-height:100vh;
+  }
+
+  .sidebar{
+    width:100%;
+    border-right:none;
+    border-bottom:1px solid #ddd;
+  }
+
+  .topbar{
+    align-items:flex-start;
+    gap:16px;
+  }
+
+  .topbar input{
+    width:min(100%, 450px);
+  }
+
+  .dashboard-grid,
+  .dashboard-section,
+  .card-list,
+  .bed-list,
+  .dorm-grid,
+  .room-grid,
+  .detail-card{
+    grid-template-columns:1fr;
+  }
+
+  .student-form,
+  .repair-form,
+  .checkin-student-panel{
+    grid-template-columns:1fr;
+  }
 }
