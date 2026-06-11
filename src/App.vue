@@ -14,6 +14,7 @@ import {
 
 const AUTH_KEY = "dormitory-auth"
 const REPAIR_OWNER_KEY = "dormitory-repair-owners"
+const REPAIR_NOTIFICATION_KEY = "dormitory-repair-notifications-read"
 const ADMIN_ACCOUNT = {
   username: "admin",
   password: "admin123",
@@ -38,6 +39,8 @@ const studentError = ref("")
 const repairs = ref([])
 const repairError = ref("")
 const repairOwners = ref(readRepairOwners())
+const readRepairNotifications = ref(readRepairNotificationState())
+const showRepairNotifications = ref(false)
 const checkinHistory = ref([])
 const historyError = ref("")
 const isLoadingHistory = ref(false)
@@ -96,6 +99,25 @@ const visibleRepairs = computed(() => {
 
   return repairs.value.filter(repair => repair.studentId === currentStudent.value.id)
 })
+
+const completedStudentRepairs = computed(() => {
+  if (isAdmin.value || !currentStudent.value) return []
+
+  return repairs.value.filter(repair =>
+    repair.studentId === currentStudent.value.id &&
+    repair.status === "已完成"
+  )
+})
+
+const unreadRepairNotifications = computed(() => {
+  if (!currentStudent.value) return []
+
+  const readIds = readRepairNotifications.value[currentStudent.value.id] || []
+
+  return completedStudentRepairs.value.filter(repair => !readIds.includes(String(repair.id)))
+})
+
+const unreadRepairNotificationCount = computed(() => unreadRepairNotifications.value.length)
 
 const visibleCheckinHistory = computed(() => {
   if (isAdmin.value) {
@@ -406,11 +428,42 @@ function saveRepairOwners() {
   localStorage.setItem(REPAIR_OWNER_KEY, JSON.stringify(repairOwners.value))
 }
 
+function readRepairNotificationState() {
+  try {
+    return JSON.parse(localStorage.getItem(REPAIR_NOTIFICATION_KEY) || "{}")
+  } catch {
+    return {}
+  }
+}
+
+function saveRepairNotificationState() {
+  localStorage.setItem(REPAIR_NOTIFICATION_KEY, JSON.stringify(readRepairNotifications.value))
+}
+
 function attachRepairOwner(repair) {
   return {
     ...repair,
     studentId: repair.studentId || repairOwners.value[String(repair.id)] || ""
   }
+}
+
+function toggleRepairNotifications() {
+  showRepairNotifications.value = !showRepairNotifications.value
+
+  if (!showRepairNotifications.value || !currentStudent.value) return
+
+  const studentId = currentStudent.value.id
+  const readIds = new Set(readRepairNotifications.value[studentId] || [])
+
+  for (const repair of completedStudentRepairs.value) {
+    readIds.add(String(repair.id))
+  }
+
+  readRepairNotifications.value = {
+    ...readRepairNotifications.value,
+    [studentId]: Array.from(readIds)
+  }
+  saveRepairNotificationState()
 }
 
 function rememberAuth(user) {
@@ -515,12 +568,14 @@ function logout() {
   authUser.value = null
   localStorage.removeItem(AUTH_KEY)
   searchKeyword.value = ""
+  showRepairNotifications.value = false
   currentPage.value = "dashboard"
 }
 
 function changePage(pageId) {
   currentPage.value = pageId
   searchKeyword.value = ""
+  showRepairNotifications.value = false
 
   if (pageId !== "rooms") {
     selectedDormId.value = ""
@@ -897,7 +952,9 @@ function resetData() {
   if (!isAdmin.value || !confirm("確定要重置所有資料嗎？")) return
 
   repairOwners.value = {}
+  readRepairNotifications.value = {}
   localStorage.removeItem(REPAIR_OWNER_KEY)
+  localStorage.removeItem(REPAIR_NOTIFICATION_KEY)
   repairs.value = []
   loadStudents()
   loadRepairs()
@@ -1006,6 +1063,34 @@ onMounted(async () => {
         <div class="user">
           <button v-if="isAdmin" @click="exportData">匯出數據</button>
           <button v-if="isAdmin" class="reset-btn" @click="resetData">重置資料</button>
+          <div v-if="!isAdmin" class="notification-wrap">
+            <button
+              class="notification-btn"
+              type="button"
+              aria-label="報修完成通知"
+              @click="toggleRepairNotifications"
+            >
+              <span aria-hidden="true">🔔</span>
+              <span v-if="unreadRepairNotificationCount > 0" class="notification-count">
+                {{ unreadRepairNotificationCount }}
+              </span>
+            </button>
+
+            <div v-if="showRepairNotifications" class="notification-panel">
+              <h3>報修通知</h3>
+              <p v-if="completedStudentRepairs.length === 0" class="notification-empty">
+                目前沒有已完成的報修通知
+              </p>
+              <div
+                v-for="repair in completedStudentRepairs.slice(0, 5)"
+                :key="repair.id"
+                class="notification-item"
+              >
+                <strong>{{ repair.item || "維修案件" }} 已完成</strong>
+                <span>{{ repair.room }}｜{{ repair.description || "報修項目已處理完成" }}</span>
+              </div>
+            </div>
+          </div>
           <strong>{{ authUser.name }}</strong>
           <button class="logout-btn" @click="logout">登出</button>
         </div>

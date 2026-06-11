@@ -398,6 +398,7 @@ app.delete("/api/students/:id", async (req, res) => {
 function normalizeRepair(row) {
   return {
     id: row.repair_id,
+    studentId: row.student_id || "",
     room: row.room_id || "",
     item: row.equipment_type || "",
     status: row.status || "待處理",
@@ -468,7 +469,7 @@ app.get("/api/checkin-history", async (req, res) => {
 app.get("/api/repairs", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT repair_id, room_id, equipment_type, description, photo_data, status, submit_date
+      `SELECT repair_id, student_id, room_id, equipment_type, description, photo_data, status, submit_date
        FROM REPAIR
        ORDER BY submit_date DESC, repair_id DESC`
     );
@@ -488,6 +489,7 @@ app.post("/api/repairs", async (req, res) => {
     item: String(req.body.item || "").trim(),
     description: String(req.body.description || "").trim(),
     photoData: String(req.body.photoData || "").trim(),
+    studentId: String(req.body.studentId || "").trim(),
     status: String(req.body.status || "待處理").trim()
   };
 
@@ -511,13 +513,14 @@ app.post("/api/repairs", async (req, res) => {
 
     const [result] = await pool.execute(
       `INSERT INTO REPAIR
-       (room_id, equipment_type, description, photo_data, submit_date, status, priority)
-       VALUES (?, ?, ?, ?, NOW(), ?, '中')`,
-      [repair.room, repair.item, repair.description, nullable(repair.photoData), repair.status]
+       (student_id, room_id, equipment_type, description, photo_data, submit_date, status, priority)
+       VALUES (?, ?, ?, ?, ?, NOW(), ?, '中')`,
+      [nullable(repair.studentId), repair.room, repair.item, repair.description, nullable(repair.photoData), repair.status]
     );
 
     res.status(201).json({
       id: result.insertId,
+      studentId: repair.studentId,
       room: repair.room,
       item: repair.item,
       status: repair.status,
