@@ -145,6 +145,50 @@ async function ensureRepairPhotoColumn() {
   }
 }
 
+async function ensureRepairMessageTable() {
+  await pool.execute(
+    `CREATE TABLE IF NOT EXISTS REPAIR_MESSAGE (
+      message_id INT PRIMARY KEY AUTO_INCREMENT,
+      repair_id INT NOT NULL,
+      sender_role ENUM('admin', 'student') NOT NULL,
+      sender_name VARCHAR(50) NOT NULL,
+      message TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (repair_id) REFERENCES REPAIR(repair_id) ON DELETE CASCADE
+    )`
+  );
+}
+
+async function ensureCheckinSnapshotColumns() {
+  const [idColumns] = await pool.execute(
+    `SHOW COLUMNS FROM CHECKIN LIKE 'student_snapshot_id'`
+  );
+
+  if (idColumns.length === 0) {
+    await pool.execute(
+      `ALTER TABLE CHECKIN ADD COLUMN student_snapshot_id CHAR(8) NULL AFTER student_id`
+    );
+  }
+
+  const [nameColumns] = await pool.execute(
+    `SHOW COLUMNS FROM CHECKIN LIKE 'student_snapshot_name'`
+  );
+
+  if (nameColumns.length === 0) {
+    await pool.execute(
+      `ALTER TABLE CHECKIN ADD COLUMN student_snapshot_name VARCHAR(50) NULL AFTER student_snapshot_id`
+    );
+  }
+
+  await pool.execute(
+    `UPDATE CHECKIN c
+     JOIN STUDENT s ON s.student_id = c.student_id
+     SET c.student_snapshot_id = COALESCE(c.student_snapshot_id, c.student_id),
+         c.student_snapshot_name = COALESCE(c.student_snapshot_name, s.name)
+     WHERE c.student_id IS NOT NULL`
+  );
+}
+
 async function syncStudentCheckin(connection, student) {
   if (!student.status && !student.bed) {
     return;
@@ -212,9 +256,17 @@ async function syncStudentCheckin(connection, student) {
         );
 
         await connection.execute(
-          `INSERT INTO CHECKIN (student_id, bed_id, checkin_date, status, change_reason)
-           VALUES (?, ?, COALESCE(?, CURRENT_DATE), '入住中', ?)`,
-          [student.id, student.bed, checkinDate, `由 ${currentCheckin.bed_id} 換房入住`]
+          `INSERT INTO CHECKIN (student_id, student_snapshot_id, student_snapshot_name,
+             bed_id, checkin_date, status, change_reason)
+           VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_DATE), '入住中', ?)`,
+          [
+            student.id,
+            student.id,
+            student.name,
+            student.bed,
+            checkinDate,
+            `由 ${currentCheckin.bed_id} 換房入住`
+          ]
         );
       } else {
         await connection.execute(
@@ -226,9 +278,10 @@ async function syncStudentCheckin(connection, student) {
       }
     } else {
       await connection.execute(
-        `INSERT INTO CHECKIN (student_id, bed_id, checkin_date, status)
-         VALUES (?, ?, COALESCE(?, CURRENT_DATE), '入住中')`,
-        [student.id, student.bed, checkinDate]
+        `INSERT INTO CHECKIN (student_id, student_snapshot_id, student_snapshot_name,
+           bed_id, checkin_date, status)
+         VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_DATE), '入住中')`,
+        [student.id, student.id, student.name, student.bed, checkinDate]
       );
     }
 
@@ -372,22 +425,43 @@ app.delete("/api/students/:id", async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    await connection.execute(
-      `UPDATE BED b
-       JOIN CHECKIN c ON c.bed_id = b.bed_id
-       SET b.availability = '空床'
-       WHERE c.student_id = ?`,
+    const [[student]] = await connection.execute(
+      `SELECT student_id, name FROM STUDENT WHERE student_id = ?`,
       [req.params.id]
     );
 
-    await connection.execute(
-      `DELETE FROM CHECKIN WHERE student_id = ?`,
+    if (!student) {
+      await connection.rollback();
+      return res.status(404).json({ message: "找不到學生資料" });
+    }
+
+    const [[activeCheckin]] = await connection.execute(
+      `SELECT checkin_id
+       FROM CHECKIN
+       WHERE student_id = ? AND checkout_date IS NULL
+       LIMIT 1`,
       [req.params.id]
     );
+
+    if (activeCheckin) {
+      await connection.rollback();
+      return res.status(409).json({
+        message: "該學生目前已入住，請先辦理退宿後再刪除。"
+      });
+    }
 
     await connection.execute(
       `DELETE FROM REPAIR WHERE student_id = ?`,
       [req.params.id]
+    );
+
+    await connection.execute(
+      `UPDATE CHECKIN
+       SET student_snapshot_id = COALESCE(student_snapshot_id, student_id),
+           student_snapshot_name = COALESCE(student_snapshot_name, ?),
+           student_id = NULL
+       WHERE student_id = ?`,
+      [student.name, req.params.id]
     );
 
     const [result] = await connection.execute(
@@ -423,6 +497,28 @@ function normalizeRepair(row) {
     status: row.status || "待處理",
     description: row.description || "",
     photoData: row.photo_data || "",
+    submitDate: row.submit_date,
+    lastAdminMessage: row.last_admin_message || "",
+    lastAdminMessageAt: row.last_admin_message_at || "",
+    lastStudentMessage: row.last_student_message || "",
+    lastStudentMessageAt: row.last_student_message_at || ""
+  };
+}
+
+function normalizeRepairMessage(row) {
+  return {
+    id: row.message_id,
+    repairId: row.repair_id,
+    senderRole: row.sender_role,
+    senderName: row.sender_name || "",
+    message: row.message || "",
+    createdAt: row.created_at,
+    studentId: row.student_id || "",
+    room: row.room_id || "",
+    item: row.equipment_type || "",
+    status: row.status || "待處理",
+    description: row.description || "",
+    photoData: row.photo_data || "",
     submitDate: row.submit_date
   };
 }
@@ -430,7 +526,7 @@ function normalizeRepair(row) {
 function normalizeCheckinHistory(row) {
   return {
     id: row.checkin_id,
-    studentId: row.student_id,
+    studentId: row.student_id || row.student_snapshot_id || "",
     studentName: row.student_name || "",
     bed: row.bed_id || "",
     room: row.room_id || "",
@@ -450,7 +546,7 @@ app.get("/api/checkin-history", async (req, res) => {
     let where = "";
 
     if (studentId) {
-      where = "WHERE c.student_id = ?";
+      where = "WHERE COALESCE(c.student_id, c.student_snapshot_id) = ?";
       params.push(studentId);
     }
 
@@ -458,7 +554,8 @@ app.get("/api/checkin-history", async (req, res) => {
       `SELECT
          c.checkin_id,
          c.student_id,
-         s.name AS student_name,
+         c.student_snapshot_id,
+         COALESCE(s.name, c.student_snapshot_name) AS student_name,
          c.bed_id,
          b.room_id,
          d.name AS dormitory_name,
@@ -467,7 +564,7 @@ app.get("/api/checkin-history", async (req, res) => {
          c.status,
          c.change_reason
        FROM CHECKIN c
-       JOIN STUDENT s ON s.student_id = c.student_id
+       LEFT JOIN STUDENT s ON s.student_id = c.student_id
        JOIN BED b ON b.bed_id = c.bed_id
        JOIN ROOM r ON r.room_id = b.room_id
        JOIN DORMITORY d ON d.dorm_id = r.dorm_id
@@ -488,15 +585,104 @@ app.get("/api/checkin-history", async (req, res) => {
 app.get("/api/repairs", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT repair_id, student_id, room_id, equipment_type, description, photo_data, status, submit_date
-       FROM REPAIR
-       ORDER BY submit_date DESC, repair_id DESC`
+      `SELECT
+         r.repair_id,
+         r.student_id,
+         r.room_id,
+         r.equipment_type,
+         r.description,
+         r.photo_data,
+         r.status,
+         r.submit_date,
+         admin_message.message AS last_admin_message,
+         admin_message.created_at AS last_admin_message_at,
+         student_message.message AS last_student_message,
+         student_message.created_at AS last_student_message_at
+       FROM REPAIR r
+       LEFT JOIN (
+         SELECT rm.repair_id, rm.message, rm.created_at
+         FROM REPAIR_MESSAGE rm
+         JOIN (
+           SELECT repair_id, MAX(message_id) AS message_id
+           FROM REPAIR_MESSAGE
+           WHERE sender_role = 'admin'
+           GROUP BY repair_id
+         ) latest ON latest.message_id = rm.message_id
+       ) admin_message ON admin_message.repair_id = r.repair_id
+       LEFT JOIN (
+         SELECT rm.repair_id, rm.message, rm.created_at
+         FROM REPAIR_MESSAGE rm
+         JOIN (
+           SELECT repair_id, MAX(message_id) AS message_id
+           FROM REPAIR_MESSAGE
+           WHERE sender_role = 'student'
+           GROUP BY repair_id
+         ) latest ON latest.message_id = rm.message_id
+       ) student_message ON student_message.repair_id = r.repair_id
+       ORDER BY r.submit_date DESC, r.repair_id DESC`
     );
 
     res.json(rows.map(normalizeRepair));
   } catch (error) {
     res.status(500).json({
       message: "讀取報修資料失敗",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/repair-notifications", async (req, res) => {
+  const role = String(req.query.role || "").trim();
+  const studentId = String(req.query.studentId || "").trim();
+
+  if (!["admin", "student"].includes(role)) {
+    return res.status(400).json({ message: "通知身分不正確" });
+  }
+
+  if (role === "student" && !studentId) {
+    return res.status(400).json({ message: "請提供學生學號" });
+  }
+
+  const params = [];
+  const senderRole = role === "admin" ? "student" : "admin";
+  let studentFilter = "";
+
+  params.push(senderRole);
+
+  if (role === "student") {
+    studentFilter = "AND r.student_id = ?";
+    params.push(studentId);
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT
+         rm.message_id,
+         rm.repair_id,
+         rm.sender_role,
+         rm.sender_name,
+         rm.message,
+         rm.created_at,
+         r.student_id,
+         r.room_id,
+         r.equipment_type,
+         r.status,
+         r.description,
+         r.photo_data,
+         r.submit_date
+       FROM REPAIR_MESSAGE rm
+       JOIN REPAIR r ON r.repair_id = rm.repair_id
+       WHERE rm.sender_role = ?
+       ${studentFilter}
+       ORDER BY rm.created_at DESC, rm.message_id DESC
+       LIMIT 50`,
+      params
+    );
+
+    res.json(rows.map(normalizeRepairMessage));
+  } catch (error) {
+    res.status(500).json({
+      message: "讀取報修通知失敗",
       error: error.message
     });
   }
@@ -584,8 +770,81 @@ app.put("/api/repairs/:id", async (req, res) => {
   }
 });
 
+app.get("/api/repairs/:id/messages", async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT message_id, repair_id, sender_role, sender_name, message, created_at
+       FROM REPAIR_MESSAGE
+       WHERE repair_id = ?
+       ORDER BY created_at ASC, message_id ASC`,
+      [req.params.id]
+    );
+
+    res.json(rows.map(normalizeRepairMessage));
+  } catch (error) {
+    res.status(500).json({
+      message: "讀取報修訊息失敗",
+      error: error.message
+    });
+  }
+});
+
+app.post("/api/repairs/:id/messages", async (req, res) => {
+  const senderRole = String(req.body.senderRole || "").trim();
+  const senderName = String(req.body.senderName || "").trim();
+  const message = String(req.body.message || "").trim();
+
+  if (!["admin", "student"].includes(senderRole)) {
+    return res.status(400).json({ message: "訊息身分不正確" });
+  }
+
+  if (!message) {
+    return res.status(400).json({ message: "請輸入訊息內容" });
+  }
+
+  if (message.length > 500) {
+    return res.status(400).json({ message: "訊息不可超過 500 字" });
+  }
+
+  try {
+    const [[repair]] = await pool.execute(
+      "SELECT repair_id FROM REPAIR WHERE repair_id = ?",
+      [req.params.id]
+    );
+
+    if (!repair) {
+      return res.status(404).json({ message: "找不到報修資料" });
+    }
+
+    const [result] = await pool.execute(
+      `INSERT INTO REPAIR_MESSAGE (repair_id, sender_role, sender_name, message, created_at)
+       VALUES (?, ?, ?, ?, NOW())`,
+      [req.params.id, senderRole, senderName || "未命名", message]
+    );
+
+    res.status(201).json({
+      id: result.insertId,
+      repairId: Number(req.params.id),
+      senderRole,
+      senderName: senderName || "未命名",
+      message,
+      createdAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "送出報修訊息失敗",
+      error: error.message
+    });
+  }
+});
+
 app.delete("/api/repairs/:id", async (req, res) => {
   try {
+    await pool.execute(
+      "DELETE FROM REPAIR_MESSAGE WHERE repair_id = ?",
+      [req.params.id]
+    );
+
     const [result] = await pool.execute(
       "DELETE FROM REPAIR WHERE repair_id = ?",
       [req.params.id]
@@ -604,7 +863,12 @@ app.delete("/api/repairs/:id", async (req, res) => {
   }
 });
 
-Promise.all([ensureDormLayout(), ensureRepairPhotoColumn()])
+Promise.all([
+  ensureDormLayout(),
+  ensureRepairPhotoColumn(),
+  ensureRepairMessageTable(),
+  ensureCheckinSnapshotColumns()
+])
   .then(() => {
     app.listen(port, host, () => {
       console.log(`Server running on http://${host}:${port}`);

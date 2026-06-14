@@ -49,6 +49,8 @@ CREATE TABLE BED (
 CREATE TABLE CHECKIN (
   checkin_id INT PRIMARY KEY AUTO_INCREMENT,
   student_id CHAR(8),
+  student_snapshot_id CHAR(8),
+  student_snapshot_name VARCHAR(50),
   bed_id VARCHAR(10),
   checkin_date DATE NOT NULL,
   checkout_date DATE,
@@ -76,6 +78,16 @@ CREATE TABLE REPAIR (
   FOREIGN KEY (room_id) REFERENCES ROOM(room_id),
   FOREIGN KEY (admin_id) REFERENCES ADMINISTRATOR(admin_id),
   CHECK (finish_date IS NULL OR finish_date >= submit_date)
+);
+
+CREATE TABLE REPAIR_MESSAGE (
+  message_id INT PRIMARY KEY AUTO_INCREMENT,
+  repair_id INT NOT NULL,
+  sender_role ENUM('admin', 'student') NOT NULL,
+  sender_name VARCHAR(50) NOT NULL,
+  message TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (repair_id) REFERENCES REPAIR(repair_id) ON DELETE CASCADE
 );
 
 INSERT INTO STUDENT (student_id, name, gender, department, phone, email)

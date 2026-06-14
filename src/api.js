@@ -72,6 +72,27 @@ export function updateRepairStatus(id, status) {
   });
 }
 
+export function fetchRepairMessages(repairId) {
+  return request(`/repairs/${encodeURIComponent(repairId)}/messages`);
+}
+
+export function fetchRepairNotifications({ role, studentId = "" }) {
+  const params = new URLSearchParams({ role });
+
+  if (studentId) {
+    params.set("studentId", studentId);
+  }
+
+  return request(`/repair-notifications?${params.toString()}`);
+}
+
+export function createRepairMessage(repairId, message) {
+  return request(`/repairs/${encodeURIComponent(repairId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(message)
+  });
+}
+
 export function removeRepair(id) {
   return request(`/repairs/${encodeURIComponent(id)}`, {
     method: "DELETE"

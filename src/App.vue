@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   fetchStudents,
   fetchCheckinHistory,
@@ -9,17 +9,23 @@ import {
   fetchRepairs,
   createRepair,
   updateRepairStatus as saveRepairStatus,
+  fetchRepairMessages,
+  fetchRepairNotifications,
+  createRepairMessage,
   removeRepair
 } from "./api"
 
 const AUTH_KEY = "dormitory-auth"
 const REPAIR_OWNER_KEY = "dormitory-repair-owners"
 const REPAIR_NOTIFICATION_KEY = "dormitory-repair-notifications-read"
+const REPAIR_MESSAGE_READ_KEY = "dormitory-repair-message-read"
+const ADMIN_REPAIR_NOTIFICATION_KEY = "dormitory-admin-repair-notifications-read"
 const ADMIN_ACCOUNT = {
   username: "admin",
   password: "admin123",
   name: "陳管理員"
 }
+let repairPollingTimer = null
 
 const searchKeyword = ref("")
 const currentPage = ref("dashboard")
@@ -40,6 +46,9 @@ const repairs = ref([])
 const repairError = ref("")
 const repairOwners = ref(readRepairOwners())
 const readRepairNotifications = ref(readRepairNotificationState())
+const readRepairMessages = ref(readRepairMessageState())
+const readAdminRepairNotifications = ref(readAdminRepairNotificationState())
+const repairNotificationMessages = ref([])
 const showRepairNotifications = ref(false)
 const checkinHistory = ref([])
 const historyError = ref("")
@@ -117,7 +126,83 @@ const unreadRepairNotifications = computed(() => {
   return completedStudentRepairs.value.filter(repair => !readIds.includes(String(repair.id)))
 })
 
-const unreadRepairNotificationCount = computed(() => unreadRepairNotifications.value.length)
+const studentAdminMessageRepairs = computed(() => {
+  if (isAdmin.value || !currentStudent.value) return []
+
+  return visibleRepairs.value.filter(repair => repair.lastAdminMessageAt)
+})
+
+const studentAdminMessageNotifications = computed(() => {
+  if (isAdmin.value || !currentStudent.value) return []
+
+  return repairNotificationMessages.value.filter(message =>
+    message.senderRole === "admin" &&
+    message.studentId === currentStudent.value.id
+  )
+})
+
+const unreadRepairMessageNotifications = computed(() => {
+  if (!currentStudent.value) return []
+
+  const readState = readRepairMessages.value[currentStudent.value.id] || {}
+
+  return studentAdminMessageNotifications.value.filter(message => {
+    const readAt = readState[String(message.repairId)] || ""
+    return !readAt || getTimeValue(message.createdAt) > getTimeValue(readAt)
+  })
+})
+
+const unreadRepairNotificationCount = computed(() => {
+  return unreadRepairNotifications.value.length + unreadRepairMessageNotifications.value.length
+})
+
+const studentSubmittedRepairs = computed(() => {
+  if (!isAdmin.value) return []
+
+  return repairs.value.filter(repair => repair.studentId)
+})
+
+const adminStudentMessageRepairs = computed(() => {
+  if (!isAdmin.value) return []
+
+  return repairs.value.filter(repair => repair.lastStudentMessageAt)
+})
+
+const adminStudentMessageNotifications = computed(() => {
+  if (!isAdmin.value) return []
+
+  return repairNotificationMessages.value.filter(message => message.senderRole === "student")
+})
+
+const unreadAdminRepairNotifications = computed(() => {
+  if (!isAdmin.value) return []
+
+  const readRepairs = readAdminRepairNotifications.value.repairs || {}
+
+  return studentSubmittedRepairs.value.filter(repair => {
+    const readAt = readRepairs[String(repair.id)] || ""
+    return !readAt || getTimeValue(repair.submitDate) > getTimeValue(readAt)
+  })
+})
+
+const unreadAdminRepairMessages = computed(() => {
+  if (!isAdmin.value) return []
+
+  const readMessages = readAdminRepairNotifications.value.messages || {}
+
+  return adminStudentMessageNotifications.value.filter(message => {
+    const readAt = readMessages[String(message.repairId)] || ""
+    return !readAt || getTimeValue(message.createdAt) > getTimeValue(readAt)
+  })
+})
+
+const adminRepairNotificationCount = computed(() => {
+  return unreadAdminRepairNotifications.value.length + unreadAdminRepairMessages.value.length
+})
+
+const adminRepairMenuBadgeCount = computed(() => {
+  return adminRepairNotificationCount.value || pendingRepairCount.value
+})
 
 const visibleCheckinHistory = computed(() => {
   if (isAdmin.value) {
@@ -165,6 +250,16 @@ const repairForm = ref({
   status: "待處理"
 })
 const isReadingRepairPhoto = ref(false)
+const photoPreview = ref({
+  src: "",
+  title: ""
+})
+const activeRepairChat = ref(null)
+const repairMessages = ref([])
+const repairMessageText = ref("")
+const isLoadingRepairMessages = ref(false)
+const isSendingRepairMessage = ref(false)
+const repairMessageError = ref("")
 
 const editingRepairId = ref("")
 const editingRepairStatus = ref("待處理")
@@ -346,6 +441,40 @@ function formatDateOnly(value) {
   return String(value).slice(0, 10)
 }
 
+function formatDateTime(value) {
+  if (!value) return ""
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16)
+  }
+
+  return date.toLocaleString("zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  })
+}
+
+function getTimeValue(value) {
+  if (!value) return 0
+
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+
+  const date = new Date(value)
+
+  if (!Number.isNaN(date.getTime())) {
+    return date.getTime()
+  }
+
+  const normalizedDate = new Date(String(value).replace(" ", "T"))
+  return Number.isNaN(normalizedDate.getTime()) ? 0 : normalizedDate.getTime()
+}
+
 const filteredRepairs = computed(() => {
   if (!searchKeyword.value) return visibleRepairs.value
 
@@ -440,6 +569,30 @@ function saveRepairNotificationState() {
   localStorage.setItem(REPAIR_NOTIFICATION_KEY, JSON.stringify(readRepairNotifications.value))
 }
 
+function readRepairMessageState() {
+  try {
+    return JSON.parse(localStorage.getItem(REPAIR_MESSAGE_READ_KEY) || "{}")
+  } catch {
+    return {}
+  }
+}
+
+function saveRepairMessageState() {
+  localStorage.setItem(REPAIR_MESSAGE_READ_KEY, JSON.stringify(readRepairMessages.value))
+}
+
+function readAdminRepairNotificationState() {
+  try {
+    return JSON.parse(localStorage.getItem(ADMIN_REPAIR_NOTIFICATION_KEY) || "{}")
+  } catch {
+    return {}
+  }
+}
+
+function saveAdminRepairNotificationState() {
+  localStorage.setItem(ADMIN_REPAIR_NOTIFICATION_KEY, JSON.stringify(readAdminRepairNotifications.value))
+}
+
 function attachRepairOwner(repair) {
   return {
     ...repair,
@@ -447,10 +600,142 @@ function attachRepairOwner(repair) {
   }
 }
 
+function markRepairMessageRead(repair) {
+  if (isAdmin.value || !currentStudent.value || !repair?.lastAdminMessageAt) return
+
+  const studentId = currentStudent.value.id
+
+  readRepairMessages.value = {
+    ...readRepairMessages.value,
+    [studentId]: {
+      ...(readRepairMessages.value[studentId] || {}),
+      [String(repair.id)]: repair.lastAdminMessageAt
+    }
+  }
+  saveRepairMessageState()
+}
+
+function markAdminRepairRead(repair) {
+  if (!isAdmin.value || !repair?.studentId) return
+
+  readAdminRepairNotifications.value = {
+    ...readAdminRepairNotifications.value,
+    repairs: {
+      ...(readAdminRepairNotifications.value.repairs || {}),
+      [String(repair.id)]: repair.submitDate || new Date().toISOString()
+    }
+  }
+  saveAdminRepairNotificationState()
+}
+
+function markAdminRepairMessageRead(repair) {
+  if (!isAdmin.value || !repair?.lastStudentMessageAt) return
+
+  readAdminRepairNotifications.value = {
+    ...readAdminRepairNotifications.value,
+    messages: {
+      ...(readAdminRepairNotifications.value.messages || {}),
+      [String(repair.id)]: repair.lastStudentMessageAt
+    }
+  }
+  saveAdminRepairNotificationState()
+}
+
+function markRepairNotificationMessageRead(message) {
+  if (isAdmin.value || !currentStudent.value || !message?.createdAt) return
+
+  const studentId = currentStudent.value.id
+
+  readRepairMessages.value = {
+    ...readRepairMessages.value,
+    [studentId]: {
+      ...(readRepairMessages.value[studentId] || {}),
+      [String(message.repairId)]: message.createdAt
+    }
+  }
+  saveRepairMessageState()
+}
+
+function markAdminRepairNotificationMessageRead(message) {
+  if (!isAdmin.value || !message?.createdAt) return
+
+  readAdminRepairNotifications.value = {
+    ...readAdminRepairNotifications.value,
+    messages: {
+      ...(readAdminRepairNotifications.value.messages || {}),
+      [String(message.repairId)]: message.createdAt
+    }
+  }
+  saveAdminRepairNotificationState()
+}
+
+function isAdminRepairUnread(repair) {
+  if (!isAdmin.value || !repair?.studentId) return false
+
+  const readAt = readAdminRepairNotifications.value.repairs?.[String(repair.id)] || ""
+  return !readAt || getTimeValue(repair.submitDate) > getTimeValue(readAt)
+}
+
+function isAdminRepairMessageUnread(message) {
+  if (!isAdmin.value || !message?.createdAt) return false
+
+  const readAt = readAdminRepairNotifications.value.messages?.[String(message.repairId)] || ""
+  return !readAt || getTimeValue(message.createdAt) > getTimeValue(readAt)
+}
+
+function isCompletedRepairUnread(repair) {
+  if (isAdmin.value || !currentStudent.value) return false
+
+  const readIds = readRepairNotifications.value[currentStudent.value.id] || []
+  return !readIds.includes(String(repair.id))
+}
+
+function isStudentRepairMessageUnread(message) {
+  if (isAdmin.value || !currentStudent.value || !message?.createdAt) return false
+
+  const readAt = readRepairMessages.value[currentStudent.value.id]?.[String(message.repairId)] || ""
+  return !readAt || getTimeValue(message.createdAt) > getTimeValue(readAt)
+}
+
+function getRepairFromNotification(message) {
+  const existingRepair = repairs.value.find(repair => repair.id === message.repairId)
+
+  if (existingRepair) {
+    return existingRepair
+  }
+
+  return attachRepairOwner({
+    id: message.repairId,
+    studentId: message.studentId,
+    room: message.room,
+    item: message.item,
+    status: message.status,
+    description: message.description,
+    photoData: message.photoData,
+    submitDate: message.submitDate
+  })
+}
+
+async function openRepairNotification(message) {
+  if (isAdmin.value) {
+    markAdminRepairNotificationMessageRead(message)
+  } else {
+    markRepairNotificationMessageRead(message)
+  }
+
+  await openRepairChat(getRepairFromNotification(message))
+}
+
 function toggleRepairNotifications() {
   showRepairNotifications.value = !showRepairNotifications.value
 
-  if (!showRepairNotifications.value || !currentStudent.value) return
+  if (!showRepairNotifications.value) return
+
+  if (isAdmin.value) {
+    return
+  }
+
+  if (!currentStudent.value) return
 
   const studentId = currentStudent.value.id
   const readIds = new Set(readRepairNotifications.value[studentId] || [])
@@ -464,6 +749,7 @@ function toggleRepairNotifications() {
     [studentId]: Array.from(readIds)
   }
   saveRepairNotificationState()
+
 }
 
 function rememberAuth(user) {
@@ -509,6 +795,47 @@ async function loadRepairs() {
   }
 }
 
+async function loadRepairNotifications() {
+  if (!isLoggedIn.value) {
+    repairNotificationMessages.value = []
+    return
+  }
+
+  if (!isAdmin.value && !currentStudent.value) {
+    repairNotificationMessages.value = []
+    return
+  }
+
+  try {
+    repairNotificationMessages.value = await fetchRepairNotifications({
+      role: isAdmin.value ? "admin" : "student",
+      studentId: isAdmin.value ? "" : currentStudent.value.id
+    })
+  } catch {
+    repairNotificationMessages.value = []
+  }
+}
+
+function startRepairPolling() {
+  stopRepairPolling()
+
+  const intervalMs = isAdmin.value ? 5000 : 30000
+
+  repairPollingTimer = window.setInterval(() => {
+    if (isLoggedIn.value) {
+      loadRepairs()
+      loadRepairNotifications()
+    }
+  }, intervalMs)
+}
+
+function stopRepairPolling() {
+  if (!repairPollingTimer) return
+
+  window.clearInterval(repairPollingTimer)
+  repairPollingTimer = null
+}
+
 async function loadCheckinHistory() {
   isLoadingHistory.value = true
   historyError.value = ""
@@ -538,9 +865,11 @@ async function login() {
       role: "admin",
       name: ADMIN_ACCOUNT.name
     })
+    startRepairPolling()
     currentPage.value = "dashboard"
     loginForm.value = { account: "", password: "" }
     await loadCheckinHistory()
+    await loadRepairNotifications()
     return
   }
 
@@ -558,7 +887,9 @@ async function login() {
     })
     currentPage.value = "my-room"
     loginForm.value = { account: "", password: "" }
+    startRepairPolling()
     await loadCheckinHistory()
+    await loadRepairNotifications()
     return
   }
 
@@ -571,6 +902,8 @@ function logout() {
   localStorage.removeItem(AUTH_KEY)
   searchKeyword.value = ""
   showRepairNotifications.value = false
+  repairNotificationMessages.value = []
+  stopRepairPolling()
   currentPage.value = "dashboard"
 }
 
@@ -588,6 +921,10 @@ function changePage(pageId) {
     repairForm.value.room = currentStudent.value.bed ? findRoomByBed(currentStudent.value.bed) : ""
     repairForm.value.status = "待處理"
   }
+}
+
+function goHome() {
+  changePage(isAdmin.value ? "dashboard" : "my-room")
 }
 
 function selectDorm(dormId) {
@@ -641,7 +978,6 @@ async function deleteStudent(id) {
   try {
     await removeStudent(id)
     students.value = students.value.filter(student => student.id !== id)
-    checkinHistory.value = checkinHistory.value.filter(record => record.studentId !== id)
   } catch (error) {
     alert(error.message)
   }
@@ -768,6 +1104,7 @@ async function addRepair() {
       photoData: "",
       status: "待處理"
     }
+    await openRepairChat(ownedRepair)
   } catch (error) {
     repairError.value = error.message
     alert(error.message)
@@ -813,6 +1150,22 @@ function handleRepairPhotoChange(event) {
   reader.readAsDataURL(file)
 }
 
+function openPhotoPreview(src, title = "現場照片預覽") {
+  if (!src) return
+
+  photoPreview.value = {
+    src,
+    title
+  }
+}
+
+function closePhotoPreview() {
+  photoPreview.value = {
+    src: "",
+    title: ""
+  }
+}
+
 async function updateRepairStatus(repair, newStatus) {
   if (!isAdmin.value) return
 
@@ -843,7 +1196,97 @@ function cancelRepairStatusEdit() {
 }
 
 function canCancelRepair(repair) {
-  return isAdmin.value || (repair.studentId === currentStudent.value?.id && repair.status !== "已完成")
+  return isAdmin.value || (repair.studentId === currentStudent.value?.id && repair.status === "待處理")
+}
+
+async function openRepairChat(repair) {
+  activeRepairChat.value = repair
+  repairMessages.value = []
+  repairMessageText.value = ""
+  repairMessageError.value = ""
+  isLoadingRepairMessages.value = true
+  markRepairMessageRead(repair)
+  markAdminRepairRead(repair)
+  markAdminRepairMessageRead(repair)
+
+  try {
+    repairMessages.value = await fetchRepairMessages(repair.id)
+  } catch (error) {
+    repairMessageError.value = error.message
+  } finally {
+    isLoadingRepairMessages.value = false
+  }
+}
+
+function closeRepairChat() {
+  activeRepairChat.value = null
+  repairMessages.value = []
+  repairMessageText.value = ""
+  repairMessageError.value = ""
+}
+
+function isOwnRepairMessage(message) {
+  return message.senderRole === (isAdmin.value ? "admin" : "student")
+}
+
+function isUnreadRepairMessage(repair) {
+  if (isAdmin.value) {
+    if (!repair?.lastStudentMessageAt) return false
+
+    const readAt = readAdminRepairNotifications.value.messages?.[String(repair.id)] || ""
+    return !readAt || getTimeValue(repair.lastStudentMessageAt) > getTimeValue(readAt)
+  }
+
+  if (!currentStudent.value || !repair?.lastAdminMessageAt) return false
+
+  const readAt = readRepairMessages.value[currentStudent.value.id]?.[String(repair.id)] || ""
+  return !readAt || getTimeValue(repair.lastAdminMessageAt) > getTimeValue(readAt)
+}
+
+async function sendRepairMessage() {
+  if (!activeRepairChat.value || isSendingRepairMessage.value) return
+
+  const message = repairMessageText.value.trim()
+
+  if (!message) {
+    repairMessageError.value = "請輸入訊息內容"
+    return
+  }
+
+  isSendingRepairMessage.value = true
+  repairMessageError.value = ""
+
+  try {
+    const savedMessage = await createRepairMessage(activeRepairChat.value.id, {
+      senderRole: isAdmin.value ? "admin" : "student",
+      senderName: authUser.value?.name || (isAdmin.value ? "管理員" : "學生"),
+      message
+    })
+
+    repairMessages.value.push(savedMessage)
+
+    if (savedMessage.senderRole === "admin") {
+      const targetRepair = repairs.value.find(repair => repair.id === activeRepairChat.value.id)
+
+      if (targetRepair) {
+        targetRepair.lastAdminMessage = savedMessage.message
+        targetRepair.lastAdminMessageAt = savedMessage.createdAt
+      }
+    } else {
+      const targetRepair = repairs.value.find(repair => repair.id === activeRepairChat.value.id)
+
+      if (targetRepair) {
+        targetRepair.lastStudentMessage = savedMessage.message
+        targetRepair.lastStudentMessageAt = savedMessage.createdAt
+      }
+    }
+
+    repairMessageText.value = ""
+  } catch (error) {
+    repairMessageError.value = error.message
+  } finally {
+    isSendingRepairMessage.value = false
+  }
 }
 
 async function deleteRepair(repair) {
@@ -857,6 +1300,9 @@ async function deleteRepair(repair) {
     repairs.value = repairs.value.filter(item => item.id !== repair.id)
     delete repairOwners.value[String(repair.id)]
     saveRepairOwners()
+    if (activeRepairChat.value?.id === repair.id) {
+      closeRepairChat()
+    }
   } catch (error) {
     repairError.value = error.message
     alert(error.message)
@@ -956,11 +1402,17 @@ function resetData() {
 
   repairOwners.value = {}
   readRepairNotifications.value = {}
+  readRepairMessages.value = {}
+  readAdminRepairNotifications.value = {}
   localStorage.removeItem(REPAIR_OWNER_KEY)
   localStorage.removeItem(REPAIR_NOTIFICATION_KEY)
+  localStorage.removeItem(REPAIR_MESSAGE_READ_KEY)
+  localStorage.removeItem(ADMIN_REPAIR_NOTIFICATION_KEY)
   repairs.value = []
+  repairNotificationMessages.value = []
   loadStudents()
   loadRepairs()
+  loadRepairNotifications()
 }
 
 watch(menu, availableMenu => {
@@ -991,8 +1443,14 @@ onMounted(async () => {
   await Promise.all([loadStudents(), loadRepairs()])
 
   if (isLoggedIn.value) {
+    startRepairPolling()
     await loadCheckinHistory()
+    await loadRepairNotifications()
   }
+})
+
+onUnmounted(() => {
+  stopRepairPolling()
 })
 </script>
 
@@ -1028,13 +1486,13 @@ onMounted(async () => {
 
   <div v-else class="layout">
     <aside class="sidebar">
-      <div class="logo">
+      <button class="logo" type="button" @click="goHome">
         <div class="logo-icon">宿</div>
         <div>
           <h2>宿舍管理系統</h2>
           <p>{{ isAdmin ? "學務處行政端" : "學生服務端" }}</p>
         </div>
-      </div>
+      </button>
 
       <button
         v-for="item in menu"
@@ -1044,11 +1502,11 @@ onMounted(async () => {
       >
         <span>{{ item.name }}</span>
         <span
-          v-if="isAdmin && item.id === 'repair' && pendingRepairCount > 0"
+          v-if="item.id === 'repair' && ((isAdmin && adminRepairMenuBadgeCount > 0) || (!isAdmin && unreadRepairNotificationCount > 0))"
           class="menu-badge"
-          aria-label="待處理報修數量"
+          :aria-label="isAdmin && adminRepairNotificationCount > 0 ? '管理員未讀報修通知數量' : (isAdmin ? '待處理報修數量' : '未讀報修通知數量')"
         >
-          {{ pendingRepairCount }}
+          {{ isAdmin ? adminRepairMenuBadgeCount : unreadRepairNotificationCount }}
         </span>
       </button>
     </aside>
@@ -1066,32 +1524,75 @@ onMounted(async () => {
         <div class="user">
           <button v-if="isAdmin" @click="exportData">匯出數據</button>
           <button v-if="isAdmin" class="reset-btn" @click="resetData">重置資料</button>
-          <div v-if="!isAdmin" class="notification-wrap">
+          <div class="notification-wrap">
             <button
               class="notification-btn"
               type="button"
-              aria-label="報修完成通知"
+              aria-label="報修通知"
               @click="toggleRepairNotifications"
             >
               <span aria-hidden="true">🔔</span>
-              <span v-if="unreadRepairNotificationCount > 0" class="notification-count">
-                {{ unreadRepairNotificationCount }}
+              <span v-if="(isAdmin ? adminRepairNotificationCount : unreadRepairNotificationCount) > 0" class="notification-count">
+                {{ isAdmin ? adminRepairNotificationCount : unreadRepairNotificationCount }}
               </span>
             </button>
 
             <div v-if="showRepairNotifications" class="notification-panel">
               <h3>報修通知</h3>
-              <p v-if="completedStudentRepairs.length === 0" class="notification-empty">
-                目前沒有已完成的報修通知
+              <p
+                v-if="isAdmin && studentSubmittedRepairs.length === 0 && adminStudentMessageNotifications.length === 0"
+                class="notification-empty"
+              >
+                目前沒有報修通知
               </p>
+              <p
+                v-else-if="!isAdmin && completedStudentRepairs.length === 0 && studentAdminMessageNotifications.length === 0"
+                class="notification-empty"
+              >
+                目前沒有報修通知
+              </p>
+              <button
+                v-if="isAdmin"
+                v-for="repair in studentSubmittedRepairs.slice(0, 5)"
+                :key="`admin-new-${repair.id}`"
+                :class="['notification-item', 'notification-action', isAdminRepairUnread(repair) ? 'notification-unread' : '']"
+                type="button"
+                @click="openRepairChat(repair)"
+              >
+                <strong>學生送出 {{ repair.item || "維修案件" }}</strong>
+                <span>{{ repair.room }}｜{{ repair.description || "點擊查看案件" }}</span>
+              </button>
+              <button
+                v-if="isAdmin"
+                v-for="message in adminStudentMessageNotifications.slice(0, 8)"
+                :key="`admin-message-${message.id}`"
+                :class="['notification-item', 'notification-action', isAdminRepairMessageUnread(message) ? 'notification-unread' : '']"
+                type="button"
+                @click="openRepairNotification(message)"
+              >
+                <strong>{{ message.senderName || "學生" }} 回覆了 {{ message.item || "維修案件" }}</strong>
+                <span>{{ message.room }}｜{{ message.message || "點擊查看訊息" }}</span>
+              </button>
               <div
+                v-if="!isAdmin"
                 v-for="repair in completedStudentRepairs.slice(0, 5)"
-                :key="repair.id"
-                class="notification-item"
+                :key="`done-${repair.id}`"
+                :class="['notification-item', isCompletedRepairUnread(repair) ? 'notification-unread' : '']"
               >
                 <strong>{{ repair.item || "維修案件" }} 已完成</strong>
                 <span>{{ repair.room }}｜{{ repair.description || "報修項目已處理完成" }}</span>
               </div>
+              <button
+                v-if="!isAdmin"
+                v-for="message in studentAdminMessageNotifications.slice(0, 8)"
+                :key="`message-${message.id}`"
+                :class="['notification-item', 'notification-action', isStudentRepairMessageUnread(message) ? 'notification-unread' : '']"
+                type="button"
+                @click="openRepairNotification(message)"
+              >
+                <strong>{{ message.senderName || "管理員" }} 回覆了 {{ message.item || "維修案件" }}</strong>
+                <span>{{ message.room }}｜{{ message.message || "點擊查看訊息" }}</span>
+              </button>
             </div>
           </div>
           <strong>{{ authUser.name }}</strong>
@@ -1602,12 +2103,19 @@ onMounted(async () => {
 
             <p v-if="isReadingRepairPhoto" class="notice">照片讀取中，請稍候...</p>
 
-            <img
+            <button
               v-if="repairForm.photoData"
-              class="repair-photo-preview"
-              :src="repairForm.photoData"
-              alt="現場照片預覽"
-            />
+              class="repair-photo-preview-btn"
+              type="button"
+              @click="openPhotoPreview(repairForm.photoData)"
+            >
+              <img
+                class="repair-photo-preview"
+                :src="repairForm.photoData"
+                alt="現場照片預覽"
+              />
+              <span>點擊預覽</span>
+            </button>
           </div>
 
           <div class="card repair-list-card">
@@ -1630,12 +2138,18 @@ onMounted(async () => {
                   <td>{{ repair.item }}</td>
                   <td>{{ repair.description || "未填寫" }}</td>
                   <td>
-                    <img
+                    <button
                       v-if="repair.photoData"
-                      class="repair-photo-thumb"
-                      :src="repair.photoData"
-                      alt="現場照片"
-                    />
+                      class="repair-photo-thumb-btn"
+                      type="button"
+                      @click="openPhotoPreview(repair.photoData, `${repair.room} ${repair.item}現場照片`)"
+                    >
+                      <img
+                        class="repair-photo-thumb"
+                        :src="repair.photoData"
+                        alt="現場照片"
+                      />
+                    </button>
                     <span v-else class="muted-text">無</span>
                   </td>
                   <td v-if="isAdmin">{{ repair.studentId || "管理員建立" }}</td>
@@ -1656,6 +2170,10 @@ onMounted(async () => {
                     <button class="delete-repair-btn" @click="cancelRepairStatusEdit">取消</button>
                   </td>
                   <td v-else>
+                    <button :class="['message-btn', isUnreadRepairMessage(repair) ? 'has-unread' : '']" @click="openRepairChat(repair)">
+                      訊息
+                      <span v-if="isUnreadRepairMessage(repair)" class="message-dot" aria-label="有新訊息"></span>
+                    </button>
                     <button v-if="isAdmin" class="edit-btn" @click="editRepairStatus(repair)">編輯</button>
                     <button
                       v-if="canCancelRepair(repair)"
@@ -1676,5 +2194,63 @@ onMounted(async () => {
         </template>
       </div>
     </main>
+
+    <div v-if="photoPreview.src" class="photo-modal" @click.self="closePhotoPreview">
+      <div class="photo-modal-panel">
+        <div class="photo-modal-header">
+          <h2>{{ photoPreview.title }}</h2>
+          <button type="button" @click="closePhotoPreview">關閉</button>
+        </div>
+        <img :src="photoPreview.src" :alt="photoPreview.title" />
+      </div>
+    </div>
+
+    <div v-if="activeRepairChat" class="chat-modal" @click.self="closeRepairChat">
+      <section class="chat-panel">
+        <header class="chat-header">
+          <div>
+            <h2>{{ activeRepairChat.room }} {{ activeRepairChat.item }}報修訊息</h2>
+            <p>{{ activeRepairChat.description || "未填寫報修原因" }}</p>
+          </div>
+          <button type="button" @click="closeRepairChat">關閉</button>
+        </header>
+
+        <div class="chat-body">
+          <p v-if="isLoadingRepairMessages" class="notice">訊息載入中...</p>
+          <p v-if="repairMessageError" class="error-notice">{{ repairMessageError }}</p>
+
+          <div v-if="!isLoadingRepairMessages && repairMessages.length === 0" class="chat-empty">
+            目前沒有訊息
+          </div>
+
+          <div
+            v-for="message in repairMessages"
+            :key="message.id"
+            :class="['chat-message', isOwnRepairMessage(message) ? 'own' : '']"
+          >
+            <div class="chat-bubble">
+              <div class="chat-meta">
+                <strong>{{ message.senderName }}</strong>
+                <span>{{ message.senderRole === 'admin' ? '管理員' : '學生' }}</span>
+                <time>{{ formatDateTime(message.createdAt) }}</time>
+              </div>
+              <p>{{ message.message }}</p>
+            </div>
+          </div>
+        </div>
+
+        <form class="chat-compose" @submit.prevent="sendRepairMessage">
+          <textarea
+            v-model="repairMessageText"
+            rows="3"
+            maxlength="500"
+            placeholder="輸入要回覆的訊息..."
+          ></textarea>
+          <button type="submit" :disabled="isSendingRepairMessage">
+            {{ isSendingRepairMessage ? "送出中" : "送出訊息" }}
+          </button>
+        </form>
+      </section>
+    </div>
   </div>
 </template>
