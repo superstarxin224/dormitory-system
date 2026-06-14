@@ -25,7 +25,9 @@ if (existsSync(".env")) {
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "0.0.0.0";
-const allowedOrigin = process.env.FRONTEND_URL || true;
+const allowedOrigin = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(",").map(origin => origin.trim()).filter(Boolean)
+  : true;
 
 app.use(cors({ origin: allowedOrigin }));
 app.use(express.json({ limit: "5mb" }));
